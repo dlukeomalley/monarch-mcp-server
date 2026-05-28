@@ -5,11 +5,7 @@ Run this script to authenticate and save a session file that the MCP server can 
 """
 
 import asyncio
-import os
 import getpass
-import shutil
-import inspect
-import traceback
 import sys
 from pathlib import Path
 
@@ -67,28 +63,55 @@ async def main():
         print("\nHow do you sign in to Monarch Money?")
         print("  1) Email and password")
         print("  2) Google / SSO (single sign-on)")
-        login_method = input("Choice (1 or 2): ").strip()
+        print("  3) Advanced: paste a session token manually")
+        login_method = input("Choice (1, 2, or 3): ").strip()
 
-        if login_method == "2":
-            print("\n📋 To get your session token from the browser:")
-            print("  1. Log in to https://app.monarchmoney.com in Chrome/Firefox")
-            print("  2. Open DevTools (F12) → Application tab → Local Storage")
-            print("     → https://app.monarchmoney.com")
-            print("  3. Copy the value for the key 'token'")
-            print("     (Alternatively: DevTools → Network tab, filter any request,")
-            print("      look for 'Authorization: Token <value>' in request headers)")
+        if login_method == "1":
+            email = input("Email: ")
+            password = getpass.getpass("Password: ")
+        elif login_method == "2":
+            # The Monarch API authenticates with email + password (+ MFA). It has no
+            # Google/SSO flow, and the web app does NOT expose a reusable login token
+            # in cookies or localStorage that can be scraped. The supported path for
+            # Google sign-in users is to set a password, then log in with it here.
+            print("\nℹ️  The Monarch API doesn't support Google sign-in directly.")
+            print("   Set a password on your account, then log in with it below:")
+            print("   → https://app.monarchmoney.com/settings/security")
+            print("   (You can keep using 'Sign in with Google' in the browser; the")
+            print("    password just gives this script a way to authenticate.)")
+            ready = input("\nHave you set a password? (y/n): ").strip().lower()
+            if ready not in ("y", "yes"):
+                print("Set a password first, then re-run this script and choose 1 or 2.")
+                return
+            email = input("Email: ")
+            password = getpass.getpass("Password: ")
+        elif login_method == "3":
+            # Last-resort manual token entry. Only useful if you already have a valid
+            # long-lived login token (e.g. from a prior session or another tool).
+            # NOTE: Monarch's web app does not reliably expose this token in the
+            # browser — if you can't find it, use option 1 or 2 instead.
+            print("\n📋 Paste a long-lived Monarch login token.")
+            print("   ⚠️  This must NOT be a JWT (xxx.yyy.zzz). A two-dot JWT is the")
+            print("       short-lived 'features' token and will return 401 on every call.")
             token = getpass.getpass("\nPaste your session token: ").strip()
             if not token:
                 print("❌ No token provided. Exiting.")
+                return
+            # Reject the short-lived features JWT up front (mirrors the library guard).
+            # A JWT has exactly two dots: header.payload.signature.
+            if token.count(".") == 2:
+                print("\n❌ That looks like the 1-hour 'features' JWT (xxx.yyy.zzz), not")
+                print("   the long-lived login token. It will return 401 on every call.")
                 return
             # Re-initialize with the token so the Authorization header is set correctly.
             # set_token() only stores the value but does not update _headers.
             mm = MonarchMoney(token=token)
             print("✅ Token set")
         else:
-            email = input("Email: ")
-            password = getpass.getpass("Password: ")
+            print(f"❌ Invalid choice: {login_method!r}. Please run again and pick 1, 2, or 3.")
+            return
 
+        if login_method in ("1", "2"):
             # Try login without MFA first
             try:
                 await mm.login(email, password, use_saved_session=False, save_session=True)
@@ -119,50 +142,29 @@ async def main():
                 print(f"Response content: {accounts}")
                 return
         except Exception as test_error:
-            print(f"❌ Connection test failed: {test_error}")
-            print(f"Error type: {type(test_error)}")
-            
-            # Check if it's a session issue
-            if "session" in str(test_error).lower() or "expired" in str(test_error).lower():
-                print("Session may be expired. Clearing old session and trying fresh login...")
-                
-                # Clear old session and try fresh login
-                if os.path.exists(".mm"):
-                    shutil.rmtree(".mm")
-                    print("🗑️ Cleared expired session files")
-                
-                # Try fresh login
-                mm_fresh = MonarchMoney()
-                try:
-                    await mm_fresh.login(email, password)
-                    print("✅ Fresh login successful (no MFA required)")
-                    mm = mm_fresh
-                    
-                    # Test connection again
-                    accounts = await mm.get_accounts()
-                    if accounts and isinstance(accounts, dict):
-                        account_count = len(accounts.get("accounts", []))
-                        print(f"✅ Found {account_count} accounts")
-                    
-                except RequireMFAException:
-                    print("🔐 MFA required for fresh login")
-                    mfa_code = input("Two Factor Code: ")
-                    
-                    mm_mfa_fresh = MonarchMoney()
-                    await mm_mfa_fresh.multi_factor_authenticate(email, password, mfa_code)
-                    print("✅ Fresh MFA authentication successful")
-                    mm = mm_mfa_fresh
-                    
-                    # Test connection again
-                    accounts = await mm.get_accounts()
-                    if accounts and isinstance(accounts, dict):
-                        account_count = len(accounts.get("accounts", []))
-                        print(f"✅ Found {account_count} accounts")
+            err = str(test_error)
+            print(f"❌ Connection test failed: {err}")
+            print(f"Error type: {type(test_error).__name__}")
+
+            # A 401/403 means the token was accepted format-wise but the server
+            # rejected it — almost always the wrong or expired token, not an API
+            # change. This is the most common failure for the SSO/manual path.
+            if "401" in err or "403" in err or "unauthorized" in err.lower():
+                print("\n🔐 The server rejected the token (401/403).")
+                if login_method == "2":
+                    print("   This means the pasted token is wrong or expired.")
+                    print("   Make sure you copied the 'Authorization: Token' value")
+                    print("   from an api.monarch.com/graphql request — NOT the")
+                    print("   1-hour features JWT (xxx.yyy.zzz) and NOT a localStorage")
+                    print("   value. Re-run this script and paste a fresh token.")
+                else:
+                    print("   Your credentials were accepted but the session token")
+                    print("   was rejected. Re-run this script to log in again.")
             else:
-                print("This appears to be an API compatibility issue.")
-                print("The MonarchMoney library API may have changed.")
-                print("Try updating the library: pip install --upgrade monarchmoneycommunity")
-                return
+                print("\n⚠️  Unexpected error talking to Monarch.")
+                print("   If this looks like a schema/field error, the library may be")
+                print("   out of date: uv lock --upgrade-package monarchmoneycommunity")
+            return
         
         # Save session securely to keyring
         try:
