@@ -6,8 +6,16 @@ Run this script to authenticate and save a session file that the MCP server can 
 
 import asyncio
 import getpass
+import os
 import sys
 from pathlib import Path
+
+# Ensure a CA bundle is available for TLS verification before any HTTPS happens.
+# python.org's macOS build ships without a default cert.pem unless the installer's
+# "Install Certificates.command" was run, which breaks HTTPS to api.monarch.com.
+# certifi provides a portable bundle; setdefault respects an explicit override.
+import certifi
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 # Add the src directory to the Python path for imports
 src_path = Path(__file__).parent / "src"

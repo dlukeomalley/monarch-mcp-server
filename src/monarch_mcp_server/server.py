@@ -7,6 +7,13 @@ from typing import Any, Dict, Optional
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+# Ensure a CA bundle is available for TLS verification before any HTTPS happens.
+# python.org's macOS build ships without a default cert.pem unless the installer's
+# "Install Certificates.command" was run, which breaks HTTPS to api.monarch.com.
+# certifi provides a portable bundle; setdefault respects an explicit override.
+import certifi
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 import mcp.types as types
