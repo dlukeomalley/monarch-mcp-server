@@ -73,27 +73,29 @@ class TestGetAccounts:
 class TestGetTransactions:
     def test_returns_formatted_transactions(self):
         result = json.loads(get_transactions())
-        assert len(result) == 2
-        assert result[0]["id"] == "txn-1"
-        assert result[0]["amount"] == -42.50
-        assert result[0]["category"] == "Groceries"
-        assert result[0]["category_id"] == "cat-1"
-        assert result[0]["account_id"] == "acc-1"
-        assert result[0]["merchant"] == "Whole Foods"
-        assert result[0]["needs_review"] is True
-        assert result[0]["notes"] == "weekly groceries"
-        assert result[0]["is_recurring"] is False
-        assert result[0]["review_status"] == "needs_review"
-        assert result[0]["is_split_transaction"] is False
-        assert result[0]["hide_from_reports"] is False
-        assert result[0]["tags"] == [{"id": "tag-1", "name": "business"}]
+        assert result["provider"] == "monarch"
+        assert result["kind"] == "transaction"
+        assert result["count"] == 2
+        assert result["items"][0]["id"] == "txn-1"
+        assert result["items"][0]["amount"] == -42.50
+        assert result["items"][0]["category"] == "Groceries"
+        assert result["items"][0]["category_id"] == "cat-1"
+        assert result["items"][0]["account_id"] == "acc-1"
+        assert result["items"][0]["merchant"] == "Whole Foods"
+        assert result["items"][0]["needs_review"] is True
+        assert result["items"][0]["notes"] == "weekly groceries"
+        assert result["items"][0]["is_recurring"] is False
+        assert result["items"][0]["review_status"] == "needs_review"
+        assert result["items"][0]["is_split_transaction"] is False
+        assert result["items"][0]["hide_from_reports"] is False
+        assert result["items"][0]["tags"] == [{"id": "tag-1", "name": "business"}]
 
     def test_handles_null_merchant(self):
         result = json.loads(get_transactions())
-        assert result[1]["merchant"] is None
-        assert result[1]["notes"] is None
-        assert result[1]["needs_review"] is False
-        assert result[1]["tags"] == []
+        assert result["items"][1]["merchant"] is None
+        assert result["items"][1]["notes"] is None
+        assert result["items"][1]["needs_review"] is False
+        assert result["items"][1]["tags"] == []
 
     def test_handles_null_category(self, mock_monarch_client):
         mock_monarch_client.get_transactions.return_value = {
@@ -120,9 +122,50 @@ class TestGetTransactions:
             }
         }
         result = json.loads(get_transactions())
-        assert result[0]["category"] is None
-        assert result[0]["category_id"] is None
-        assert result[0]["is_pending"] is True
+        assert result["items"][0]["category"] is None
+        assert result["items"][0]["category_id"] is None
+        assert result["items"][0]["is_pending"] is True
+
+    def test_returns_paging_metadata(self, mock_monarch_client):
+        mock_monarch_client.get_transactions.return_value = {
+            "allTransactions": {
+                "totalCount": 12,
+                "results": [
+                    {
+                        "id": f"txn-{i}",
+                        "date": "2026-03-01",
+                        "amount": -1.0,
+                        "description": "Paged",
+                        "category": None,
+                        "account": None,
+                        "merchant": None,
+                        "isPending": False,
+                        "needsReview": False,
+                        "notes": None,
+                        "isRecurring": False,
+                        "reviewStatus": None,
+                        "isSplitTransaction": False,
+                        "hideFromReports": False,
+                        "tags": [],
+                    }
+                    for i in range(5)
+                ],
+            }
+        }
+
+        result = json.loads(get_transactions(limit=5, offset=5, search="Paged"))
+
+        assert result["count"] == 5
+        assert result["query"] == "Paged"
+        assert result["page_info"] == {
+            "complete": False,
+            "has_more": True,
+            "total_count": 12,
+            "limit": 5,
+            "offset": 5,
+        }
+        assert result["execution"]["provider_filtered"] is True
+        assert result["execution"]["provider_query"] == "Paged"
 
     def test_passes_filters_to_client(self, mock_monarch_client):
         get_transactions(
@@ -176,7 +219,8 @@ class TestGetTransactions:
             "allTransactions": {"results": []}
         }
         result = json.loads(get_transactions())
-        assert result == []
+        assert result["items"] == []
+        assert result["count"] == 0
 
     def test_handles_api_error(self, mock_monarch_client):
         mock_monarch_client.get_transactions.side_effect = Exception("Auth expired")

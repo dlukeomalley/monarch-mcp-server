@@ -218,6 +218,9 @@ def get_transactions(
         is_recurring: Filter for recurring transactions
     """
     try:
+        merged_account_ids = list(account_ids or [])
+        if account_id and account_id not in merged_account_ids:
+            merged_account_ids.append(account_id)
 
         async def _get_transactions() -> Any:
             client = await get_monarch_client()
@@ -237,10 +240,6 @@ def get_transactions(
             if is_recurring is not None:
                 filters["is_recurring"] = is_recurring
 
-            # Merge account_id (singular, backward compat) into account_ids list
-            merged_account_ids = list(account_ids or [])
-            if account_id and account_id not in merged_account_ids:
-                merged_account_ids.append(account_id)
             if merged_account_ids:
                 filters["account_ids"] = merged_account_ids
 
@@ -252,28 +251,26 @@ def get_transactions(
             return await client.get_transactions(limit=limit, offset=offset, **filters)
 
         transactions = run_async(_get_transactions())
+        all_transactions = transactions.get("allTransactions", {})
+        raw_transactions = all_transactions.get("results", [])
+        total_count = all_transactions.get("totalCount")
 
         # Format transactions for display
         transaction_list = []
-        for txn in transactions.get("allTransactions", {}).get("results", []):
+        for txn in raw_transactions:
+            category = txn.get("category") or {}
+            account = txn.get("account") or {}
+            merchant = txn.get("merchant") or {}
             transaction_info = {
                 "id": txn.get("id"),
                 "date": txn.get("date"),
                 "amount": txn.get("amount"),
                 "description": txn.get("description"),
-                "category": txn.get("category", {}).get("name")
-                if txn.get("category")
-                else None,
-                "category_id": txn.get("category", {}).get("id")
-                if txn.get("category")
-                else None,
-                "account": txn.get("account", {}).get("displayName"),
-                "account_id": txn.get("account", {}).get("id")
-                if txn.get("account")
-                else None,
-                "merchant": txn.get("merchant", {}).get("name")
-                if txn.get("merchant")
-                else None,
+                "category": category.get("name"),
+                "category_id": category.get("id"),
+                "account": account.get("displayName"),
+                "account_id": account.get("id"),
+                "merchant": merchant.get("name"),
                 "is_pending": txn.get("isPending", False),
                 "needs_review": txn.get("needsReview"),
                 "notes": txn.get("notes"),
@@ -288,7 +285,52 @@ def get_transactions(
             }
             transaction_list.append(transaction_info)
 
-        return json.dumps(transaction_list, indent=2, default=str)
+        complete = (
+            offset + len(transaction_list) >= total_count
+            if total_count is not None
+            else None
+        )
+        filters_applied = {
+            key: value
+            for key, value in {
+                "start_date": start_date,
+                "end_date": end_date,
+                "account_ids": merged_account_ids or None,
+                "category_ids": category_ids,
+                "tag_ids": tag_ids,
+                "has_notes": has_notes,
+                "is_split": is_split,
+                "is_recurring": is_recurring,
+            }.items()
+            if value is not None
+        }
+        provider_filtered = bool(search or filters_applied)
+        result = {
+            "ok": True,
+            "provider": "monarch",
+            "kind": "transaction",
+            "query": search,
+            "filters": filters_applied,
+            "items": transaction_list,
+            "count": len(transaction_list),
+            "page_info": {
+                "complete": complete,
+                "has_more": None if complete is None else not complete,
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+            },
+            "execution": {
+                "provider_filtered": provider_filtered,
+                "client_filtered": False,
+                "candidate_only": False,
+                "dropped_count": 0,
+                "provider_query": search,
+                "filters_applied": filters_applied,
+            },
+            "error": None,
+        }
+        return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get transactions: {e}")
         return f"Error getting transactions: {str(e)}"
