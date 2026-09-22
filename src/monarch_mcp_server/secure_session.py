@@ -22,6 +22,43 @@ KEYRING_USERNAME = "monarch-token"
 _TOKEN_DIR = Path.home() / ".monarch-mcp-server"
 _TOKEN_FILE = _TOKEN_DIR / "token"
 
+# A fleet-managed token: the fleet runtime points this server at one fleet's own
+# ``KEY=VALUE`` file (`fleet auth monarch` installs and rotates it). When the pointer is
+# set it is the only store — no keyring, no ~/.monarch-mcp-server fallback — so a fleet
+# can never quietly run on another fleet's (or the operator's) token, and this server
+# never writes it.
+TOKEN_FILE_VAR = "MONARCH_TOKEN_FILE"
+TOKEN_KEY = "MONARCH_TOKEN"
+
+
+def fleet_token_file() -> Optional[Path]:
+    """The fleet-managed token file, or ``None`` when this server runs standalone."""
+    raw = os.environ.get(TOKEN_FILE_VAR)
+    return Path(raw).expanduser() if raw else None
+
+
+def reauth_hint() -> str:
+    """The one command that installs a fresh token for this server's deployment."""
+    path = fleet_token_file()
+    if path is not None:
+        return f"run `fleet auth monarch --fleet <fleet>` to reinstall the token at {path}"
+    return "run `python login_setup.py` in the monarch-mcp-server checkout"
+
+
+def _read_fleet_token(path: Path) -> Optional[str]:
+    if not path.is_file():
+        logger.info(f"🔍 No fleet token file at {path}")
+        return None
+    for line in path.read_text().splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and key.strip() == TOKEN_KEY:
+            value = value.strip().strip("'\"")
+            if value:
+                logger.info(f"✅ Token loaded from {path}")
+                return value
+    logger.info(f"🔍 No {TOKEN_KEY} in {path}")
+    return None
+
 
 def _keyring_available() -> bool:
     """Check whether a usable keyring backend is available."""
@@ -96,6 +133,9 @@ class SecureMonarchSession:
 
     def save_token(self, token: str) -> None:
         """Save the authentication token to the system keyring or file fallback."""
+        if fleet_token_file() is not None:
+            logger.warning(f"⚠️  Token is fleet-managed; not saved here. {reauth_hint()}")
+            return
         if self._use_keyring:
             try:
                 import keyring
@@ -110,7 +150,11 @@ class SecureMonarchSession:
         self._cleanup_old_session_files()
 
     def load_token(self) -> Optional[str]:
-        """Load the authentication token from the system keyring or file fallback."""
+        """Load the authentication token from the fleet's file when one is pointed at,
+        else from the system keyring or file fallback."""
+        fleet_file = fleet_token_file()
+        if fleet_file is not None:
+            return _read_fleet_token(fleet_file)
         if self._use_keyring:
             try:
                 import keyring
@@ -132,6 +176,9 @@ class SecureMonarchSession:
 
     def delete_token(self) -> None:
         """Delete the authentication token from all storage backends."""
+        if fleet_token_file() is not None:
+            logger.warning(f"⚠️  Token is fleet-managed; not deleted here. {reauth_hint()}")
+            return
         # Try keyring
         if self._use_keyring:
             try:

@@ -19,7 +19,11 @@ from mcp.server.fastmcp import FastMCP
 import mcp.types as types
 from monarchmoney import MonarchMoney, RequireMFAException  # type: ignore
 from pydantic import BaseModel, Field
-from monarch_mcp_server.secure_session import secure_session
+from monarch_mcp_server.secure_session import (
+    fleet_token_file,
+    reauth_hint,
+    secure_session,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -87,12 +91,32 @@ async def get_monarch_client() -> MonarchMoney:
             logger.error(f"Failed to login to Monarch Money: {e}")
             raise
 
-    raise RuntimeError("🔐 Authentication needed! Run: python login_setup.py")
+    raise RuntimeError(f"🔐 No Monarch token installed; {reauth_hint()}")
+
+
+def _describe(error: Exception) -> str:
+    """An error message an agent can act on. Monarch signals a dead token as HTTP 401 on
+    every call, which read as a transient API failure for ten days in 2026-09; name the
+    cause and the one fix instead of echoing the status line."""
+    text = str(error)
+    if "401" in text or "Unauthorized" in text:
+        return (
+            "Monarch rejected the stored token (HTTP 401): it has expired or been revoked, "
+            f"so every Monarch read fails until a person reinstalls it; {reauth_hint()}"
+        )
+    return text
 
 
 @mcp.tool()
 def setup_authentication() -> str:
     """Get instructions for setting up secure authentication with Monarch Money."""
+    if fleet_token_file() is not None:
+        return (
+            "🔐 This server's token is fleet-managed. Only a person can install one: "
+            f"{reauth_hint()}. Signing in needs the account password and a second factor, "
+            "so an agent cannot do it; ask the principal and report reads as unavailable "
+            "until then."
+        )
     return """🔐 Monarch Money - One-Time Setup
 
 1️⃣ Open Terminal and run:
@@ -116,26 +140,24 @@ def setup_authentication() -> str:
 
 @mcp.tool()
 def check_auth_status() -> str:
-    """Check if already authenticated with Monarch Money."""
+    """Ask Monarch whether the stored token is accepted right now.
+
+    A live check, not a file check: a token can sit on disk for weeks after Monarch has
+    revoked it, and every read then fails with HTTP 401. Trust this answer, not the
+    presence of a token.
+    """
     try:
-        # Check if we have a token in the keyring
         token = secure_session.load_token()
-        if token:
-            status = "✅ Authentication token found in secure keyring storage\n"
-        else:
-            status = "❌ No authentication token found in keyring\n"
-
-        email = os.getenv("MONARCH_EMAIL")
-        if email:
-            status += f"📧 Environment email: {email}\n"
-
-        status += (
-            "\n💡 Try get_accounts to test connection or run login_setup.py if needed."
-        )
-
-        return status
+        if not token:
+            return f"❌ No Monarch token installed; {reauth_hint()}"
+        source = fleet_token_file() or "keyring/file store"
+        try:
+            run_async(MonarchMoney(token=token).get_accounts())
+        except Exception as e:
+            return f"❌ Token from {source} is not accepted: {_describe(e)}"
+        return f"✅ Token from {source} is accepted by Monarch"
     except Exception as e:
-        return f"Error checking auth status: {str(e)}"
+        return f"Error checking auth status: {_describe(e)}"
 
 
 @mcp.tool()
@@ -152,7 +174,7 @@ def debug_session_loading() -> str:
         import traceback
 
         error_details = traceback.format_exc()
-        return f"❌ Keyring access failed:\nError: {str(e)}\nType: {type(e)}\nTraceback:\n{error_details}"
+        return f"❌ Keyring access failed:\nError: {_describe(e)}\nType: {type(e)}\nTraceback:\n{error_details}"
 
 
 @mcp.tool()
@@ -189,7 +211,7 @@ def get_accounts() -> str:
         return json.dumps(account_list, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get accounts: {e}")
-        return f"Error getting accounts: {str(e)}"
+        return f"Error getting accounts: {_describe(e)}"
 
 
 @mcp.tool()
@@ -340,7 +362,7 @@ def get_transactions(
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get transactions: {e}")
-        return f"Error getting transactions: {str(e)}"
+        return f"Error getting transactions: {_describe(e)}"
 
 
 @mcp.tool()
@@ -365,7 +387,7 @@ def get_budgets(
         return json.dumps(budgets, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get budgets: {e}")
-        return f"Error getting budgets: {str(e)}"
+        return f"Error getting budgets: {_describe(e)}"
 
 
 @mcp.tool()
@@ -397,7 +419,7 @@ def get_cashflow(
         return json.dumps(cashflow, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get cashflow: {e}")
-        return f"Error getting cashflow: {str(e)}"
+        return f"Error getting cashflow: {_describe(e)}"
 
 
 @mcp.tool()
@@ -419,7 +441,7 @@ def get_account_holdings(account_id: str) -> str:
         return json.dumps(holdings, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get account holdings: {e}")
-        return f"Error getting account holdings: {str(e)}"
+        return f"Error getting account holdings: {_describe(e)}"
 
 
 @mcp.tool()
@@ -469,7 +491,7 @@ def create_transaction(
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to create transaction: {e}")
-        return f"Error creating transaction: {str(e)}"
+        return f"Error creating transaction: {_describe(e)}"
 
 
 @mcp.tool()
@@ -529,7 +551,7 @@ def update_transaction(
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to update transaction: {e}")
-        return f"Error updating transaction: {str(e)}"
+        return f"Error updating transaction: {_describe(e)}"
 
 
 @mcp.tool()
@@ -558,7 +580,7 @@ def get_transaction_categories() -> str:
         return json.dumps(categories, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get transaction categories: {e}")
-        return f"Error getting transaction categories: {str(e)}"
+        return f"Error getting transaction categories: {_describe(e)}"
 
 
 @mcp.tool()
@@ -578,7 +600,7 @@ def get_transaction_category_groups() -> str:
         return json.dumps(groups, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get transaction category groups: {e}")
-        return f"Error getting transaction category groups: {str(e)}"
+        return f"Error getting transaction category groups: {_describe(e)}"
 
 
 @mcp.tool()
@@ -619,7 +641,7 @@ def create_transaction_category(
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to create transaction category: {e}")
-        return f"Error creating transaction category: {str(e)}"
+        return f"Error creating transaction category: {_describe(e)}"
 
 
 @mcp.tool()
@@ -646,7 +668,7 @@ def get_transaction_tags() -> str:
         return json.dumps(tags, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to get transaction tags: {e}")
-        return f"Error getting transaction tags: {str(e)}"
+        return f"Error getting transaction tags: {_describe(e)}"
 
 
 @mcp.tool()
@@ -670,7 +692,7 @@ def set_transaction_tags(transaction_id: str, tag_ids: list[str]) -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to set transaction tags: {e}")
-        return f"Error setting transaction tags: {str(e)}"
+        return f"Error setting transaction tags: {_describe(e)}"
 
 
 @mcp.tool()
@@ -699,7 +721,7 @@ def add_transaction_tag(transaction_id: str, tag_id: str) -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to add transaction tag: {e}")
-        return f"Error adding transaction tag: {str(e)}"
+        return f"Error adding transaction tag: {_describe(e)}"
 
 
 @mcp.tool()
@@ -721,7 +743,7 @@ def create_transaction_tag(name: str, color: str) -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to create transaction tag: {e}")
-        return f"Error creating transaction tag: {str(e)}"
+        return f"Error creating transaction tag: {_describe(e)}"
 
 
 @mcp.tool()
@@ -745,7 +767,7 @@ def categorize_transaction(transaction_id: str, category_id: str) -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to categorize transaction: {e}")
-        return f"Error categorizing transaction: {str(e)}"
+        return f"Error categorizing transaction: {_describe(e)}"
 
 
 @mcp.tool()
@@ -762,7 +784,7 @@ def refresh_accounts() -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to refresh accounts: {e}")
-        return f"Error refreshing accounts: {str(e)}"
+        return f"Error refreshing accounts: {_describe(e)}"
 
 
 def main() -> None:
@@ -771,7 +793,7 @@ def main() -> None:
     try:
         mcp.run()
     except Exception as e:
-        logger.error(f"Failed to run server: {str(e)}")
+        logger.error(f"Failed to run server: {_describe(e)}")
         raise
 
 
