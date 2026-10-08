@@ -36,6 +36,19 @@ class TestGetAccounts:
         assert result[0]["is_active"] is True
         assert result[0]["is_hidden"] is False
 
+    def test_reports_when_each_account_last_synced(self, mock_monarch_client):
+        accounts = mock_monarch_client.get_accounts.return_value["accounts"]
+        accounts[0]["displayLastUpdatedAt"] = "2026-10-07T13:02:11.000000+00:00"
+        accounts[0]["credential"] = {"updateRequired": True}
+        accounts[1]["isManual"] = True
+        result = json.loads(get_accounts())
+        assert result[0]["last_synced_at"] == "2026-10-07T13:02:11.000000+00:00"
+        assert result[0]["connection_needs_update"] is True
+        assert result[0]["is_manual"] is False
+        assert result[1]["last_synced_at"] is None
+        assert result[1]["connection_needs_update"] is False
+        assert result[1]["is_manual"] is True
+
     def test_hidden_account_flagged(self):
         result = json.loads(get_accounts())
         assert result[1]["is_hidden"] is True
@@ -539,9 +552,32 @@ class TestAddTransactionTag:
 
 
 class TestRefreshAccounts:
-    def test_refreshes_accounts(self):
+    @staticmethod
+    def _as_monarch_declares_it(client):
+        """The library's own signature: ``account_ids`` is required, and the reply
+        is a bare ``True``. A plain AsyncMock accepts a call with no arguments,
+        which is how the tool shipped calling it that way."""
+        asked = []
+
+        async def request_accounts_refresh(account_ids):
+            asked.append(list(account_ids))
+            return True
+
+        client.request_accounts_refresh = request_accounts_refresh
+        return asked
+
+    def test_no_arguments_refreshes_every_account(self, mock_monarch_client):
+        asked = self._as_monarch_declares_it(mock_monarch_client)
         result = json.loads(refresh_accounts())
-        assert result["requestAccountsRefresh"]["success"] is True
+        assert asked == [["acc-1", "acc-2"]]
+        assert result == {"refresh_requested": True, "account_ids": ["acc-1", "acc-2"]}
+
+    def test_named_accounts_are_the_only_ones_refreshed(self, mock_monarch_client):
+        asked = self._as_monarch_declares_it(mock_monarch_client)
+        result = json.loads(refresh_accounts(account_ids=["acc-2"]))
+        assert asked == [["acc-2"]]
+        assert result["account_ids"] == ["acc-2"]
+        mock_monarch_client.get_accounts.assert_not_called()
 
     def test_handles_api_error(self, mock_monarch_client):
         mock_monarch_client.request_accounts_refresh.side_effect = Exception("Timeout")

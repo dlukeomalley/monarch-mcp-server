@@ -3,7 +3,7 @@
 import os
 import logging
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import json
 from concurrent.futures import ThreadPoolExecutor
 
@@ -204,7 +204,16 @@ def get_accounts() -> str:
                 "balance": account.get("currentBalance"),
                 "institution": institution_name,
                 "is_active": not account.get("deactivatedAt"),
-                "is_hidden": account.get("isHidden", False)
+                "is_hidden": account.get("isHidden", False),
+                # When Monarch last pulled this account from its institution; a
+                # manual account has no institution to pull from.
+                "last_synced_at": account.get("displayLastUpdatedAt"),
+                "is_manual": bool(account.get("isManual")),
+                # The institution login has lapsed: a refresh cannot bring this
+                # account up to date until it is reconnected in Monarch.
+                "connection_needs_update": bool(
+                    (account.get("credential") or {}).get("updateRequired")
+                ),
             }
             account_list.append(account_info)
 
@@ -771,17 +780,30 @@ def categorize_transaction(transaction_id: str, category_id: str) -> str:
 
 
 @mcp.tool()
-def refresh_accounts() -> str:
-    """Request account data refresh from financial institutions."""
+def refresh_accounts(account_ids: Optional[List[str]] = None) -> str:
+    """Ask Monarch to pull fresh balances and transactions from the institutions.
+
+    With no arguments, every account is refreshed; pass account_ids (from
+    get_accounts) to refresh only those. The request returns at once and the
+    pull runs at Monarch: read get_accounts again and compare last_synced_at to
+    see when it has landed.
+    """
     try:
 
-        async def _refresh_accounts() -> Any:
+        async def _refresh_accounts() -> List[str]:
             client = await get_monarch_client()
-            return await client.request_accounts_refresh()
+            ids = account_ids
+            if not ids:
+                accounts = await client.get_accounts()
+                ids = [account["id"] for account in accounts.get("accounts", [])]
+            await client.request_accounts_refresh(ids)
+            return list(ids)
 
-        result = run_async(_refresh_accounts())
+        refreshed = run_async(_refresh_accounts())
 
-        return json.dumps(result, indent=2, default=str)
+        return json.dumps(
+            {"refresh_requested": True, "account_ids": refreshed}, indent=2
+        )
     except Exception as e:
         logger.error(f"Failed to refresh accounts: {e}")
         return f"Error refreshing accounts: {_describe(e)}"
