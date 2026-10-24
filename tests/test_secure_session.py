@@ -149,6 +149,73 @@ def test_failed_publication_preserves_the_old_token_and_cleans_temporary_files(
     assert list(token_file.parent.iterdir()) == [token_file]
 
 
+def test_publication_does_not_delete_unrelated_files_in_the_launch_directory(
+    isolated_file_session,
+):
+    session, _ = isolated_file_session
+    unrelated = Path("monarch_session.json")
+    unrelated.write_text("unrelated operator data")
+
+    session.save_token("new-token")
+
+    assert unrelated.read_text() == "unrelated operator data"
+
+
+@pytest.mark.parametrize("has_fallback", [False, True])
+def test_keyring_publication_removes_the_superseded_fallback_token(
+    isolated_file_session, monkeypatch, has_fallback
+):
+    session, token_file = isolated_file_session
+    if not has_fallback:
+        token_file.unlink()
+    backend = type("FixtureBackend", (), {"priority": 5})()
+    monkeypatch.setattr(keyring, "get_keyring", lambda: backend)
+    publish = Mock()
+    monkeypatch.setattr(keyring, "set_password", publish)
+
+    session.save_token("new-token")
+
+    publish.assert_called_once_with(
+        "com.mcp.monarch-mcp-server", "monarch-token", "new-token"
+    )
+    assert not token_file.exists()
+
+
+def test_failed_keyring_publication_uses_the_file_owner(
+    isolated_file_session, monkeypatch
+):
+    session, token_file = isolated_file_session
+    backend = type("FixtureBackend", (), {"priority": 5})()
+    monkeypatch.setattr(keyring, "get_keyring", lambda: backend)
+    monkeypatch.setattr(
+        keyring,
+        "set_password",
+        Mock(side_effect=RuntimeError("fixture keyring failure")),
+    )
+
+    session.save_token("new-token")
+
+    assert token_file.read_text() == "new-token"
+    assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
+
+
+def test_failed_fallback_removal_does_not_republish_the_token(
+    isolated_file_session, monkeypatch
+):
+    session, token_file = isolated_file_session
+    backend = type("FixtureBackend", (), {"priority": 5})()
+    monkeypatch.setattr(keyring, "get_keyring", lambda: backend)
+    publish = Mock()
+    monkeypatch.setattr(keyring, "set_password", publish)
+    monkeypatch.setattr(Path, "unlink", Mock(side_effect=PermissionError("fixture")))
+
+    with pytest.raises(PermissionError):
+        session.save_token("new-token")
+
+    publish.assert_called_once()
+    assert token_file.read_text() == "old-token"
+
+
 @pytest.mark.parametrize("token", [None, "", "   ", 123])
 def test_authenticated_client_needs_a_token_before_publication(monkeypatch, token):
     session = SecureMonarchSession()

@@ -42,12 +42,7 @@ def run_async(coro: Coroutine[object, object, _Result]) -> _Result:
     """Run async function in a new thread with its own event loop."""
 
     def _run() -> _Result:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        return asyncio.run(coro)
 
     with ThreadPoolExecutor() as executor:
         future = executor.submit(_run)

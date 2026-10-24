@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+import keyring
 from monarchmoney import MonarchMoney
 
 logger = logging.getLogger(__name__)
@@ -67,8 +68,6 @@ def _read_fleet_token(path: Path) -> Optional[str]:
 def _keyring_available() -> bool:
     """Check whether a usable keyring backend is available."""
     try:
-        import keyring
-
         return keyring.get_keyring().priority > 0
     except Exception:
         return False
@@ -116,17 +115,15 @@ class SecureMonarchSession:
             )
         if _keyring_available():
             try:
-                import keyring
-
                 keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, token)
-                logger.info("✅ Token saved securely to keyring")
-                self._cleanup_old_session_files()
-                return
             except Exception as e:
                 logger.warning(f"⚠️  Keyring save failed, falling back to file: {e}")
+            else:
+                _TOKEN_FILE.unlink(missing_ok=True)
+                logger.info("✅ Token saved securely to keyring")
+                return
 
         self._save_token_file(token)
-        self._cleanup_old_session_files()
 
     def load_token(self) -> Optional[str]:
         """Load the authentication token from the fleet's file when one is pointed at,
@@ -136,8 +133,6 @@ class SecureMonarchSession:
             return _read_fleet_token(fleet_file)
         if _keyring_available():
             try:
-                import keyring
-
                 token = keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME)
                 if token:
                     logger.info("✅ Token loaded from keyring")
@@ -173,26 +168,6 @@ class SecureMonarchSession:
         if not isinstance(token, str) or not token.strip():
             raise RuntimeError("Monarch did not provide a session token")
         self.save_token(token.strip())
-
-    def _cleanup_old_session_files(self) -> None:
-        """Clean up old insecure session files."""
-        cleanup_paths = [
-            ".mm/mm_session.pickle",
-            "monarch_session.json",
-            ".mm",  # Remove the entire directory if empty
-        ]
-
-        for path in cleanup_paths:
-            try:
-                if os.path.exists(path):
-                    if os.path.isfile(path):
-                        os.remove(path)
-                        logger.info(f"🗑️ Cleaned up old insecure session file: {path}")
-                    elif os.path.isdir(path) and not os.listdir(path):
-                        os.rmdir(path)
-                        logger.info(f"🗑️ Cleaned up empty session directory: {path}")
-            except Exception as e:
-                logger.warning(f"⚠️  Could not clean up {path}: {e}")
 
 
 # Global session manager instance

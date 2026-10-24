@@ -35,7 +35,10 @@ The independent language/ownership pass read all four application/bootstrap Pyth
 files, all application tests and fixtures, the compiler conformance case, project
 configuration and this design. Supporting reads covered the locked client's login,
 MFA and persistence implementation, Fleet's registry/auth owner and Bogle persona.
-The native eng-rig committed-source report is recorded below when complete.
+The native eng-rig committed-source report at d5a7378 completed with full reads of
+all seven requested application/auth/compiler files, plus supporting gate config.
+It read AGENTS.md and CLAUDE.md, ran no checks (one denied tool), and did not read
+the original tool tests, conftest or README; the separate independent pass did.
 Managed hooks retain canonical provenance; this is not a fresh full audit of the
 shared kit or its optional JavaScript asset. There is no application Rust or
 TypeScript in this checkout.
@@ -51,6 +54,9 @@ TypeScript in this checkout.
 | Backend capability and shadow state | Native priority/reselection witnesses replace backend-name guesses, startup writes and cached capability. The selected backend owns its capability; an empty keyring still permits the existing standalone file fallback. |
 | Cancellation and orphan APIs | The native store-spy witness observed deletion before cancellation. Setup now preserves the previous session until replacement; delete_token and its sole helper lost their only application caller and were deleted. |
 | Unused configuration | MonarchConfig had no application consumer. Removed it and its imports rather than retaining a test-only model. |
+| F1: unrelated launch-directory deletion | The native reviewer identified obsolete relative-path cleanup. A temporary-home publisher actually deleted unrelated monarch_session.json before correction. No producer remains, so removed the cleanup and both calls. |
+| F2: stale parallel fallback | A native fake-keyring witness retained the superseded plaintext token after successful publication. The secure owner now removes only its own fallback file after keyring success; cleanup errors propagate rather than silently creating another store. |
+| F3: incomplete coroutine cleanup | A native bridge witness left an async generator open. asyncio.run inside the existing worker owns loop shutdown and closes it before returning, while retaining concrete static result inference. |
 
 Backend capability follows the [keyring backend contract](https://keyring.readthedocs.io/en/latest/#write-your-own-keyring-backend)
 and was checked against the locked implementation. Tests use fake backends,
@@ -76,11 +82,18 @@ provider response models, broad auth-check reply admission, pagination/completen
 money/date validation and mutation-result truth. No first-party suppression or
 additional Any annotation was introduced to make the gate pass.
 
+Native-review F4 (repeated tool coroutine/render/error pipelines) and F5 (duplicated
+TLS bootstrap/credential prompts) remain consolidation work. F6 (empty-account
+refresh semantics) is unresolved; no provider mutation was run and no empty-list
+behavior was invented. The report suggested a cleanup helper and separate error
+policies only where evidence establishes their contracts; a shared function alone
+would not resolve the legacy untyped response admission.
+
 File publication assumes a trusted standalone home and does not claim full
 power-loss durability, symlink confinement or cross-store transactional rotation.
 An explicitly empty MONARCH_TOKEN_FILE retains its existing standalone semantics;
-admission of that deployment setting has not been reviewed. The removed legacy
-cleanup remains best effort only after successful standalone publication.
+admission of that deployment setting has not been reviewed. Old arbitrary
+launch-directory session files are deliberately left to their owners.
 
 Adoption applies to the actual mounted feature branch, not an unrelated fork main.
 A reviewed commit and clean active-checkout fast-forward are required before

@@ -91,3 +91,22 @@ def test_auth_status_verifies_the_token_from_the_managed_file(tmp_path, monkeypa
 
     constructor.assert_called_once_with(token="fixture-token")
     client.get_accounts.assert_awaited_once()
+
+
+def test_async_bridge_closes_generators_before_returning():
+    closed = Mock()
+    retained = []
+
+    async def values():
+        try:
+            yield 7
+        finally:
+            closed()
+
+    async def read_one():
+        stream = values()
+        retained.append(stream)
+        return await anext(stream)
+
+    assert server.run_async(read_one()) == 7
+    closed.assert_called_once()
