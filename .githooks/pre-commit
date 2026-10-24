@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fogline standard pre-commit hook.
+#
+# Activated via `git config core.hooksPath .githooks` (fogline-install does this
+# once per clone), NOT via `pre-commit install`. That distinction
+# matters: `pre-commit install` writes its shim based on `git rev-parse
+# --git-dir`, which for a linked git-worktree resolves to the worktree-private
+# hooks dir, not the shared one git actually checks — so hooks silently don't
+# fire in worktrees (see pre-commit/pre-commit#808, #3630). core.hooksPath, set
+# as a relative path, resolves per-worktree against each worktree's own root
+# instead, and since this file is a normal tracked file, every existing and
+# future worktree gets it for free on checkout. Full writeup:
+# eng-rig/docs/git-hooks.md.
+#
+# This script is the fixed entry point; all actual hook logic lives in
+# .pre-commit-config.yaml so it stays a plain, versioned, multi-language config.
+set -euo pipefail
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "✗ uv not found — required to run pre-commit (see eng-rig/docs/git-hooks.md)" >&2
+  exit 1
+fi
+
+exec uvx pre-commit run --hook-stage pre-commit

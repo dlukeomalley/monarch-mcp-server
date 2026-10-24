@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Reviews are explicit checkpoints, not commit side effects. Keep this
+# no-op installed so upgrading replaces older auto-review hooks too.
+# Run: python3 .claude/hooks/review.py --reviewer NAME --commit HEAD [FILE ...]
+exit 0

@@ -241,7 +241,7 @@ Sessions last for weeks, but if expired:
 3. Session will be refreshed automatically
 
 ### Common Error Messages
-- **"No valid session found"**: Run `python login_setup.py` (or `uv run python login_setup.py`) 
+- **"No valid session found"**: Run `python login_setup.py` (or `uv run python login_setup.py`)
 - **"Invalid account ID"**: Use `get_accounts` to see valid account IDs
 - **"Date format error"**: Use YYYY-MM-DD format for dates
 
@@ -260,15 +260,19 @@ monarch-mcp-server/
 ```
 
 ### Session Management
-- Sessions are stored securely in `.mm/mm_session.pickle`
-- Automatic session discovery and loading
-- Sessions persist across Claude Desktop and Claude Code restarts
-- No need for frequent re-authentication
+- Fleet deployments read only the `MONARCH_TOKEN_FILE` supplied by the host. Missing
+  credentials require `fleet auth monarch --fleet <fleet>`; environment credentials
+  and standalone stores are not fallbacks for a managed deployment.
+- Standalone sessions use the selected viable keyring backend, with the existing
+  `~/.monarch-mcp-server/token` fallback when keyring has no token or is unavailable.
+  The fallback file has owner-only permissions; it is not encrypted.
+- Canceling setup preserves the existing session. Successful authentication replaces
+  it, and session validity is determined by Monarch.
 
 ### Security Features
 - Credentials never transmitted through Claude Desktop or Claude Code
 - MFA/2FA fully supported
-- Session files are encrypted
+- Keyring behavior follows the selected backend; file fallback is access-restricted
 - Authentication handled in secure terminal environment
 
 ## 🙏 Acknowledgments

@@ -1,24 +1,25 @@
 """Monarch Money MCP Server - Main server implementation."""
 
-import os
-import logging
 import asyncio
-from typing import Any, Dict, List, Optional
 import json
+import logging
+import os
+from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, TypeVar
 
 # Ensure a CA bundle is available for TLS verification before any HTTPS happens.
 # python.org's macOS build ships without a default cert.pem unless the installer's
 # "Install Certificates.command" was run, which breaks HTTPS to api.monarch.com.
 # certifi provides a portable bundle; setdefault respects an explicit override.
 import certifi
+
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-import mcp.types as types
-from monarchmoney import MonarchMoney, RequireMFAException  # type: ignore
-from pydantic import BaseModel, Field
+from monarchmoney import MonarchMoney
+
 from monarch_mcp_server.secure_session import (
     fleet_token_file,
     reauth_hint,
@@ -34,12 +35,13 @@ load_dotenv()
 
 # Initialize FastMCP server
 mcp = FastMCP("Monarch Money MCP Server")
+_Result = TypeVar("_Result")
 
 
-def run_async(coro: Any) -> Any:
+def run_async(coro: Coroutine[object, object, _Result]) -> _Result:
     """Run async function in a new thread with its own event loop."""
 
-    def _run() -> Any:
+    def _run() -> _Result:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -52,44 +54,32 @@ def run_async(coro: Any) -> Any:
         return future.result()
 
 
-class MonarchConfig(BaseModel):
-    """Configuration for Monarch Money connection."""
-
-    email: Optional[str] = Field(default=None, description="Monarch Money email")
-    password: Optional[str] = Field(default=None, description="Monarch Money password")
-    session_file: str = Field(
-        default="monarch_session.json", description="Session file path"
-    )
-
-
 async def get_monarch_client() -> MonarchMoney:
     """Get or create MonarchMoney client instance using secure session storage."""
     # Try to get authenticated client from secure session
     client = secure_session.get_authenticated_client()
 
     if client is not None:
-        logger.info("✅ Using authenticated client from secure keyring storage")
+        logger.info("Using the stored Monarch session")
         return client
 
-    # If no secure session, try environment credentials
-    email = os.getenv("MONARCH_EMAIL")
-    password = os.getenv("MONARCH_PASSWORD")
-
-    if email and password:
-        try:
-            client = MonarchMoney()
-            await client.login(email, password)
-            logger.info(
-                "Successfully logged into Monarch Money with environment credentials"
-            )
-
-            # Save the session securely
-            secure_session.save_authenticated_session(client)
-
-            return client
-        except Exception as e:
-            logger.error(f"Failed to login to Monarch Money: {e}")
-            raise
+    if fleet_token_file() is None:
+        email = os.getenv("MONARCH_EMAIL")
+        password = os.getenv("MONARCH_PASSWORD")
+        if email and password:
+            try:
+                client = MonarchMoney()
+                await client.login(
+                    email, password, use_saved_session=False, save_session=False
+                )
+                logger.info(
+                    "Successfully logged into Monarch Money with environment credentials"
+                )
+                secure_session.save_authenticated_session(client)
+                return client
+            except Exception as e:
+                logger.error(f"Failed to login to Monarch Money: {e}")
+                raise
 
     raise RuntimeError(f"🔐 No Monarch token installed; {reauth_hint()}")
 
@@ -109,33 +99,12 @@ def _describe(error: Exception) -> str:
 
 @mcp.tool()
 def setup_authentication() -> str:
-    """Get instructions for setting up secure authentication with Monarch Money."""
-    if fleet_token_file() is not None:
-        return (
-            "🔐 This server's token is fleet-managed. Only a person can install one: "
-            f"{reauth_hint()}. Signing in needs the account password and a second factor, "
-            "so an agent cannot do it; ask the principal and report reads as unavailable "
-            "until then."
-        )
-    return """🔐 Monarch Money - One-Time Setup
-
-1️⃣ Open Terminal and run:
-   python login_setup.py
-
-2️⃣ Enter your Monarch Money credentials when prompted
-   • Email and password
-   • 2FA code if you have MFA enabled
-
-3️⃣ Session will be saved automatically and last for weeks
-
-4️⃣ Start using Monarch tools in Claude Desktop:
-   • get_accounts - View all accounts
-   • get_transactions - Recent transactions
-   • get_budgets - Budget information
-
-✅ Session persists across Claude restarts
-✅ No need to re-authenticate frequently
-✅ All credentials stay secure in terminal"""
+    """Explain interactive setup without contacting Monarch."""
+    return (
+        f"Authenticate interactively: {reauth_hint()}. "
+        "Enter account credentials and any second factor in the terminal, "
+        "then use check_auth_status to verify the stored session with Monarch."
+    )
 
 
 @mcp.tool()
@@ -161,23 +130,6 @@ def check_auth_status() -> str:
 
 
 @mcp.tool()
-def debug_session_loading() -> str:
-    """Debug keyring session loading issues."""
-    try:
-        # Check keyring access
-        token = secure_session.load_token()
-        if token:
-            return f"✅ Token found in keyring (length: {len(token)})"
-        else:
-            return "❌ No token found in keyring. Run login_setup.py to authenticate."
-    except Exception as e:
-        import traceback
-
-        error_details = traceback.format_exc()
-        return f"❌ Keyring access failed:\nError: {_describe(e)}\nType: {type(e)}\nTraceback:\n{error_details}"
-
-
-@mcp.tool()
 def get_accounts() -> str:
     """Get all financial accounts from Monarch Money."""
     try:
@@ -195,7 +147,11 @@ def get_accounts() -> str:
             type_name = type_info.get("name") if isinstance(type_info, dict) else None
 
             institution_info = account.get("institution", {})
-            institution_name = institution_info.get("name") if isinstance(institution_info, dict) else None
+            institution_name = (
+                institution_info.get("name")
+                if isinstance(institution_info, dict)
+                else None
+            )
 
             account_info = {
                 "id": account.get("id"),
@@ -388,9 +344,7 @@ def get_budgets(
 
         async def _get_budgets() -> Any:
             client = await get_monarch_client()
-            return await client.get_budgets(
-                start_date=start_date, end_date=end_date
-            )
+            return await client.get_budgets(start_date=start_date, end_date=end_date)
 
         budgets = run_async(_get_budgets())
         return json.dumps(budgets, indent=2, default=str)

@@ -3,25 +3,28 @@
 import json
 from unittest.mock import AsyncMock
 
+import pytest
+
 from monarch_mcp_server.server import (
+    add_transaction_tag,
+    categorize_transaction,
+    create_transaction,
+    create_transaction_category,
+    create_transaction_tag,
+    get_account_holdings,
     get_accounts,
-    get_transactions,
     get_budgets,
     get_cashflow,
-    get_account_holdings,
-    create_transaction,
-    update_transaction,
-    refresh_accounts,
-    check_auth_status,
     get_transaction_categories,
-    get_transaction_tags,
-    set_transaction_tags,
-    create_transaction_tag,
-    categorize_transaction,
     get_transaction_category_groups,
-    create_transaction_category,
-    add_transaction_tag,
+    get_transaction_tags,
+    get_transactions,
+    refresh_accounts,
+    set_transaction_tags,
+    update_transaction,
 )
+
+pytestmark = pytest.mark.usefixtures("patch_monarch_client")
 
 
 class TestGetAccounts:
@@ -488,7 +491,9 @@ class TestGetTransactionCategoryGroups:
         assert result[0]["type"] == "expense"
 
     def test_handles_api_error(self, mock_monarch_client):
-        mock_monarch_client.get_transaction_category_groups.side_effect = Exception("boom")
+        mock_monarch_client.get_transaction_category_groups.side_effect = Exception(
+            "boom"
+        )
         result = get_transaction_category_groups()
         assert "Error getting transaction category groups" in result
 
