@@ -89,6 +89,17 @@ behavior was invented. The report suggested a cleanup helper and separate error
 policies only where evidence establishes their contracts; a shared function alone
 would not resolve the legacy untyped response admission.
 
+Verification at7ee851145f8e: make check and every normal commit hook pass, including
+seven mypy sources, compiler conformance and100 offline tests. The installed native
+correction report ioyidu33 completes with no confirmed surviving correction finding:
+full secure-session owner, partial bridge/tests and evidence delta; one denied tool,
+no executed checks. Its unconfirmed keyring-dependency question is resolved by the
+existing required project dependency. The separate independent correction pass
+fully reads the secure owner and both changed test files, with complete bridge/delta
+coverage. Whole-server coverage comes from the prior full pass, not the final delta
+report. Executor-submission failure before starting a coroutine remains uncovered;
+the generator witness proves normal worker shutdown, not every startup failure.
+
 File publication assumes a trusted standalone home and does not claim full
 power-loss durability, symlink confinement or cross-store transactional rotation.
 An explicitly empty MONARCH_TOKEN_FILE retains its existing standalone semantics;
