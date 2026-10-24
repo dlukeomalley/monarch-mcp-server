@@ -182,15 +182,17 @@ def mock_monarch_client():
     }
 
     client.create_transaction_tag.return_value = {
-        "createTransactionTag": {"tag": {"id": "tag-new", "name": "new", "color": "#0000ff"}}
+        "createTransactionTag": {
+            "tag": {"id": "tag-new", "name": "new", "color": "#0000ff"}
+        }
     }
 
     return client
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def patch_monarch_client(mock_monarch_client):
-    """Automatically patch get_monarch_client for all tests."""
+    """Stub provider access for tool tests that opt into this fixture."""
     with patch(
         "monarch_mcp_server.server.get_monarch_client",
         new_callable=AsyncMock,

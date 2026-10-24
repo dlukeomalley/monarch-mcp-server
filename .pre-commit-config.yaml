@@ -1,0 +1,45 @@
+# Fogline standard pre-commit config — starter template.
+# Seeded by fogline-install; add this project's native checks.
+# Docs: eng-rig/docs/git-hooks.md
+#
+# Add an `exclude:` (top-level or per-hook) for vendored/raw/third-party material
+# this repo carries verbatim (e.g. race-strategy's raw/, code/, prompts/ — Ian's
+# files as-sent, not ours to reformat).
+
+repos:
+  - repo: local
+    hooks:
+      - id: native-checks
+        name: Monarch format, typing and offline tests
+        entry: make check
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: git@github.com:foglinelabs/eng-rig.git
+    rev: 'ae0defb4625be298b50f08e427a9911ed66aeb10'
+    hooks:
+      - id: comment-length
+      - id: zero-fill
+      - id: pydantic-updates
+      - id: conversion-churn
+      - id: installed-fresh
+        args: ["--require", "agents", "--require", "hooks", "--require", "skills", "--require", "claude-skills"]

@@ -52,17 +52,39 @@ where = ["src"]
 [tool.black]
 line-length = 88
 target-version = ['py312']
+extend-exclude = '/\.claude/hooks/(check_shell_edits|check_test_scope|review)\.py$'
 
 [tool.isort]
 profile = "black"
 line_length = 88
+extend_skip = [
+    ".claude/hooks/check_shell_edits.py",
+    ".claude/hooks/check_test_scope.py",
+    ".claude/hooks/review.py",
+]
 
 [tool.mypy]
 python_version = "3.12"
+plugins = ["pydantic.mypy"]
 strict = true
+check_untyped_defs = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+mypy_path = ["src"]
+files = [".", ".claude"]
+exclude = ["(^|/)(tests|build|dist|__pycache__)/", "^\\.claude/worktrees/"]
+
+# This locked third-party client publishes neither stubs nor a py.typed marker.
+# Its call signatures and returned payloads remain an explicit inference limit.
+[[tool.mypy.overrides]]
+module = ["monarchmoney", "monarchmoney.*"]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_typed = true
+init_forbid_extra = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

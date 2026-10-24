@@ -74,6 +74,7 @@ Thumbs.db
 *.pickle
 *.session
 *.json
+!.claude/settings.json
 .env*
 !.env.example
 auth_tokens/
